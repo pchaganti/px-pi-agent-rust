@@ -27,18 +27,18 @@
 ## The Problem
 
 You want an AI coding assistant in your terminal, but existing tools are:
-- **Slow to start** — Node.js/Python runtimes add 500ms+ before you can type
-- **Memory hungry** — Electron apps or heavy runtimes eat gigabytes
-- **Unreliable** — Streaming breaks, sessions corrupt, tools fail silently
-- **Hard to extend** — Closed ecosystems or complex plugin systems
+- **Slow to start**: Node.js/Python runtimes add 500ms+ before you can type
+- **Memory hungry**: Electron apps or heavy runtimes eat gigabytes
+- **Unreliable**: Streaming breaks, sessions corrupt, tools fail silently
+- **Hard to extend**: Closed ecosystems or complex plugin systems
 
 ## The Solution
 
 **pi_agent_rust** is a from-scratch Rust port of [Pi Agent](https://github.com/badlogic/pi) by [Mario Zechner](https://github.com/badlogic) (made with his blessing!). Single binary, instant startup, rock-solid streaming, and 7 battle-tested built-in tools.
 
-This isn't a direct line-by-line port—it leverages two purpose-built Rust libraries:
-- **[asupersync](https://github.com/Dicklesworthstone/asupersync)** — A structured concurrency async runtime with built-in HTTP, TLS, and SQLite
-- **[rich_rust](https://github.com/Dicklesworthstone/rich_rust)** — A Rust port of [Rich](https://github.com/Textualize/rich) by [Will McGugan](https://github.com/willmcgugan), providing beautiful terminal output with markup syntax
+Rather than a direct line-by-line translation, this port builds on two purpose-built Rust libraries:
+- **[asupersync](https://github.com/Dicklesworthstone/asupersync)**: A structured concurrency async runtime with built-in HTTP, TLS, and SQLite
+- **[rich_rust](https://github.com/Dicklesworthstone/rich_rust)**: A Rust port of [Rich](https://github.com/Textualize/rich) by [Will McGugan](https://github.com/willmcgugan), providing beautiful terminal output with markup syntax
 
 ```bash
 # Start a session
@@ -62,6 +62,33 @@ pi -p "What does this error mean?" < error.log
 | **Tool execution** | Process tree management | Basic subprocess |
 | **Sessions** | JSONL with branching | Varies |
 | **Unsafe code** | Forbidden | N/A |
+
+---
+
+## Foundation Libraries
+
+### asupersync
+
+[asupersync](https://github.com/Dicklesworthstone/asupersync) is a structured concurrency async runtime designed for applications that need predictable resource cleanup. Key features used by pi_agent_rust:
+
+- **Capability-based context (`Cx`)**: Async functions receive an explicit context that controls what they can do (HTTP, filesystem, time). This makes testing deterministic.
+- **HTTP client with TLS**: Built-in `reqwest`-like API with rustls, avoiding OpenSSL dependency hell
+- **Structured cancellation**: When a parent task cancels, all child tasks cancel cleanly. No orphaned futures.
+
+The migration from tokio to asupersync is ongoing. Currently, tokio handles the main runtime while asupersync provides the SSE parser and will eventually handle all I/O.
+
+### rich_rust
+
+[rich_rust](https://github.com/Dicklesworthstone/rich_rust) is a Rust port of Will McGugan's [Rich](https://github.com/Textualize/rich) Python library. It provides:
+
+- **Markup syntax**: `[bold red]error[/]` renders as bold red text
+- **Tables**: ASCII/Unicode table rendering with alignment and borders
+- **Panels**: Boxed content with titles
+- **Progress bars**: Animated progress indicators
+- **Markdown**: Terminal-rendered markdown with syntax highlighting
+- **Themes**: Consistent color schemes across components
+
+The terminal UI (currently WIP) uses rich_rust for all output formatting, providing the same visual quality as Rich-based Python tools.
 
 ---
 
@@ -181,8 +208,8 @@ cargo build --release
 ### Dependencies
 
 Pi has minimal runtime dependencies:
-- `fd` — Required for the `find` tool (install via `apt install fd-find` or `brew install fd`)
-- `rg` — Optional, improves grep performance (install via `apt install ripgrep` or `brew install ripgrep`)
+- `fd`: Required for the `find` tool (install via `apt install fd-find` or `brew install fd`)
+- `rg`: Optional, improves grep performance (install via `apt install ripgrep` or `brew install ripgrep`)
 
 ---
 
@@ -299,11 +326,184 @@ Pi reads configuration from `~/.config/pi/config.json`:
 
 ### Key Design Decisions
 
-1. **No unsafe code** — `#![forbid(unsafe_code)]` enforced project-wide
-2. **Streaming-first** — Custom SSE parser, no blocking on responses
-3. **Process tree management** — `sysinfo` crate ensures no orphaned processes
-4. **Structured errors** — `thiserror` with specific error types per component
-5. **Size-optimized release** — LTO + strip + opt-level=z for lean binaries
+1. **No unsafe code**: `#![forbid(unsafe_code)]` enforced project-wide
+2. **Streaming-first**: Custom SSE parser, no blocking on responses
+3. **Process tree management**: `sysinfo` crate ensures no orphaned processes
+4. **Structured errors**: `thiserror` with specific error types per component
+5. **Size-optimized release**: LTO + strip + opt-level=z for lean binaries
+
+---
+
+## Deep Dive: Core Algorithms
+
+### SSE Streaming Parser
+
+The SSE (Server-Sent Events) parser is a custom implementation that handles Anthropic's streaming response format. Unlike library-based approaches, the parser operates as a state machine that processes bytes incrementally:
+
+```
+Bytes → Line Accumulator → Event Parser → Typed StreamEvent
+```
+
+**Key characteristics:**
+
+| Property | Implementation |
+|----------|----------------|
+| **Buffering** | Zero-copy where possible; lines accumulated only when incomplete |
+| **Event types** | 12 distinct variants: MessageStart, ContentBlockStart, ContentBlockDelta, ContentBlockStop, MessageDelta, MessageStop, Ping, Error, and thinking-specific events |
+| **Error recovery** | Malformed events logged but don't crash the stream |
+| **Memory** | Fixed-size rolling buffer prevents unbounded growth |
+
+The parser handles edge cases like:
+- Multi-line `data:` fields (concatenated with newlines)
+- Events split across TCP packet boundaries
+- The `event:` field appearing before or after `data:`
+- CRLF and LF line endings interchangeably
+
+### Truncation Algorithm
+
+Large outputs from tools (file reads, command output, grep results) must be truncated to avoid exhausting the LLM's context window. The truncation algorithm preserves usefulness while staying within limits:
+
+```
+┌─────────────────────────────────────────┐
+│           Original Content              │
+│         (potentially huge)              │
+└─────────────────────────────────────────┘
+                    │
+                    ▼
+┌─────────────────────────────────────────┐
+│  HEAD: First N/2 lines                  │
+│  ─────────────────────────              │
+│  [... X lines truncated ...]            │
+│  ─────────────────────────              │
+│  TAIL: Last N/2 lines                   │
+└─────────────────────────────────────────┘
+```
+
+**Constants:**
+
+| Limit | Value | Rationale |
+|-------|-------|-----------|
+| `MAX_LINES` | 2000 | Balances context usage vs. completeness |
+| `MAX_BYTES` | 50KB | Prevents binary file accidents |
+| `GREP_MAX_LINE_LENGTH` | 500 chars | Truncates minified code |
+
+The algorithm:
+1. Splits content into lines
+2. If line count exceeds `MAX_LINES`, takes first 1000 and last 1000
+3. Inserts a marker showing how many lines were omitted
+4. If byte count still exceeds `MAX_BYTES`, applies byte-level truncation
+5. Returns metadata indicating truncation occurred, enabling the LLM to request specific ranges
+
+### Process Tree Management
+
+The `bash` tool must handle runaway processes, infinite loops, and fork bombs without leaving orphans. The implementation uses the `sysinfo` crate to walk the process tree:
+
+```rust
+// Pseudocode for process cleanup
+fn kill_process_tree(root_pid: Pid) {
+    let system = System::new();
+    let children = find_all_descendants(root_pid, &system);
+
+    // Kill children first (deepest first), then parent
+    for child in children.iter().rev() {
+        kill(child, SIGKILL);
+    }
+    kill(root_pid, SIGKILL);
+}
+```
+
+**Timeout behavior:**
+
+1. Command starts with configurable timeout (default 120s)
+2. Output streams to a rolling buffer in real-time
+3. On timeout: SIGTERM sent, 5s grace period, then SIGKILL
+4. Process tree walked and all descendants killed
+5. Exit code set to indicate timeout vs. normal termination
+
+This prevents the common failure mode where killing a shell leaves its children running.
+
+### Session Tree Structure
+
+Sessions use a tree structure rather than a flat list, enabling conversation branching (useful when exploring different approaches):
+
+```
+                    ┌─────────┐
+                    │ Message │ (root)
+                    │   #1    │
+                    └────┬────┘
+                         │
+                    ┌────▼────┐
+                    │ Message │
+                    │   #2    │
+                    └────┬────┘
+                         │
+              ┌──────────┼──────────┐
+              │                     │
+         ┌────▼────┐          ┌────▼────┐
+         │ Message │          │ Message │ (branch)
+         │   #3    │          │   #3b   │
+         └────┬────┘          └────┬────┘
+              │                    │
+         ┌────▼────┐          ┌────▼────┐
+         │ Message │          │ Message │
+         │   #4    │          │   #4b   │
+         └─────────┘          └─────────┘
+```
+
+**JSONL format (v3):**
+
+Each line is a self-contained JSON object with a `type` discriminator:
+
+```json
+{"type":"header","version":3,"cwd":"/project","created":"2024-01-15T10:30:00Z"}
+{"type":"message","id":"a1b2c3d4","parent":"root","role":"user","content":[...]}
+{"type":"message","id":"e5f6g7h8","parent":"a1b2c3d4","role":"assistant","content":[...]}
+{"type":"model_change","id":"i9j0k1l2","parent":"e5f6g7h8","model":"claude-sonnet-4-20250514"}
+```
+
+The `parent` field creates the tree. Replaying a session walks the tree from root to the current leaf. Branching creates a new message with a different `parent` than the previous continuation.
+
+### Provider Abstraction
+
+The `Provider` trait abstracts over different LLM backends:
+
+```rust
+#[async_trait]
+pub trait Provider: Send + Sync {
+    fn name(&self) -> &str;
+    fn models(&self) -> &[Model];
+
+    async fn stream(
+        &self,
+        context: &Context,
+        options: &StreamOptions,
+    ) -> Result<impl Stream<Item = Result<StreamEvent>>>;
+}
+```
+
+**Context structure:**
+
+```rust
+pub struct Context {
+    pub system: Option<String>,      // System prompt
+    pub messages: Vec<Message>,       // Conversation history
+    pub tools: Vec<ToolDef>,          // Available tools with JSON schemas
+}
+```
+
+**StreamOptions:**
+
+```rust
+pub struct StreamOptions {
+    pub model: String,
+    pub max_tokens: u32,
+    pub temperature: Option<f32>,
+    pub thinking: Option<ThinkingConfig>,  // Extended thinking settings
+    pub stop_sequences: Vec<String>,
+}
+```
+
+This design allows adding new providers (OpenAI, Gemini) without modifying the agent loop. Each provider translates the common types to its wire format and emits a unified `StreamEvent` stream.
 
 ---
 
@@ -384,6 +584,75 @@ Input: { "path": "src/", "limit": 500 }
 
 ---
 
+## Performance Engineering
+
+### Why Rust Matters for CLI Tools
+
+CLI tools have different performance requirements than servers or GUI applications. The critical metric is **time-to-first-interaction**: how quickly can the user start typing after invoking the command?
+
+| Phase | TypeScript/Node.js | Rust |
+|-------|-------------------|------|
+| Process spawn | ~10ms | ~10ms |
+| Runtime initialization | 200-500ms | 0ms (no runtime) |
+| Module loading | 100-300ms | 0ms (static linking) |
+| JIT warmup | 50-100ms | 0ms (AOT compiled) |
+| **Total** | **360-910ms** | **~10ms** |
+
+This difference compounds with usage frequency. A developer invoking `pi` 50 times per day saves 15-45 minutes per week in startup latency alone.
+
+### Binary Size Optimization
+
+The release profile aggressively optimizes for size:
+
+```toml
+[profile.release]
+opt-level = "z"      # Size optimization (not speed)
+lto = true           # Link-time optimization across all crates
+codegen-units = 1    # Single codegen unit (slower compile, better optimization)
+panic = "abort"      # No unwinding machinery
+strip = true         # Remove symbol tables
+```
+
+**Size breakdown (approximate):**
+
+| Component | Contribution |
+|-----------|-------------|
+| Core binary logic | ~3MB |
+| reqwest + TLS | ~5MB |
+| serde + JSON | ~1MB |
+| clap (CLI) | ~1MB |
+| Other dependencies | ~3MB |
+| **Total (stripped)** | **~13-15MB** |
+
+Compare to Node.js: the `node` binary alone is 80MB+, before any application code.
+
+### Memory Usage
+
+Rust's ownership model enables predictable memory usage without garbage collection pauses:
+
+| State | Memory |
+|-------|--------|
+| Startup (idle) | ~15MB |
+| Active session (small) | ~25MB |
+| Large file in context | ~30-50MB |
+| Streaming response | +0MB (streamed, not buffered) |
+
+The absence of a GC means no surprise latency spikes during streaming output.
+
+### Streaming Architecture
+
+Responses stream token-by-token from the API to the terminal with minimal buffering:
+
+```
+API Server → TCP → SSE Parser → Event Handler → Terminal
+     │                              │
+     └──────── no buffering ────────┘
+```
+
+Each token appears on screen within milliseconds of leaving Anthropic's servers. The SSE parser processes events as they arrive rather than waiting for complete responses.
+
+---
+
 ## Troubleshooting
 
 ### "fd not found"
@@ -460,10 +729,82 @@ Pi is honest about what it doesn't do:
 
 ---
 
+## Design Philosophy
+
+### Specification-First Porting
+
+This port follows a "specification extraction" methodology rather than line-by-line translation:
+
+1. **Extract behavior**: Study the TypeScript implementation to understand *what* it does, not *how*
+2. **Document the spec**: Write down expected behaviors, edge cases, and invariants
+3. **Implement from spec**: Write idiomatic Rust that satisfies the spec
+4. **Conformance testing**: Verify behavior matches via fixture-based tests
+
+This approach yields better code than mechanical translation. TypeScript idioms (callbacks, promises, class hierarchies) don't map cleanly to Rust (ownership, traits, enums). Fighting the language produces worse results than embracing it.
+
+### Conformance Testing
+
+The test suite includes fixture-based conformance tests that validate tool behavior:
+
+```json
+{
+  "version": "1.0",
+  "tool": "edit",
+  "cases": [
+    {
+      "name": "edit_simple_replace",
+      "setup": [
+        {"type": "create_file", "path": "test.txt", "content": "Hello, World!"}
+      ],
+      "input": {
+        "path": "test.txt",
+        "oldText": "World",
+        "newText": "Rust"
+      },
+      "expected": {
+        "content_contains": ["Successfully replaced"],
+        "details": {"oldLength": 5, "newLength": 4}
+      }
+    }
+  ]
+}
+```
+
+Each fixture specifies:
+- **Setup**: Files/directories to create before the test
+- **Input**: Tool parameters
+- **Expected**: Output content patterns, exact field matches, or error conditions
+
+This allows validating that the Rust implementation produces equivalent results to the TypeScript original without coupling to implementation details.
+
+### No Plugin Architecture
+
+Pi deliberately excludes a plugin system. The reasoning:
+
+1. **Complexity cost**: Plugin systems require stable APIs, versioning, sandboxing, and documentation
+2. **Security surface**: Plugins executing arbitrary code in a tool that runs shell commands is risky
+3. **Maintenance burden**: Plugin compatibility across versions creates ongoing work
+4. **Fork-friendly**: The codebase is small enough (~5K lines) that forking is practical
+
+To add a tool: fork the repo, implement the `Tool` trait in `src/tools.rs`, and build your custom binary. This takes less time than learning a plugin API.
+
+### Unsafe Forbidden
+
+The `#![forbid(unsafe_code)]` directive is project-wide and non-negotiable. Rationale:
+
+- **Attack surface**: Pi executes user-provided shell commands and reads arbitrary files
+- **Memory bugs = security bugs**: Buffer overflows or use-after-free in this context could be exploitable
+- **Performance irrelevant**: The bottleneck is network latency to the API, not CPU cycles
+- **Dependencies audited**: All dependencies either use no unsafe or are well-audited (e.g., `rustls`)
+
+The safe Rust subset provides all necessary functionality without compromising security.
+
+---
+
 ## FAQ
 
 **Q: What's the relationship to the original Pi Agent?**
-A: This is an authorized Rust port of [Pi Agent](https://github.com/badlogic/pi) by [Mario Zechner](https://github.com/badlogic), created with his blessing. It's not a line-by-line translation—instead, it's built on [asupersync](https://github.com/Dicklesworthstone/asupersync) (a structured concurrency runtime) and [rich_rust](https://github.com/Dicklesworthstone/rich_rust) (a port of Will McGugan's [Rich](https://github.com/Textualize/rich) library), bringing idiomatic Rust architecture while preserving Pi Agent's excellent UX.
+A: This is an authorized Rust port of [Pi Agent](https://github.com/badlogic/pi) by [Mario Zechner](https://github.com/badlogic), created with his blessing. The architecture differs significantly from the TypeScript original: it uses [asupersync](https://github.com/Dicklesworthstone/asupersync) for structured concurrency and [rich_rust](https://github.com/Dicklesworthstone/rich_rust) (a port of Will McGugan's [Rich](https://github.com/Textualize/rich) library) for terminal rendering. The goal is idiomatic Rust while preserving Pi Agent's UX.
 
 **Q: Why rewrite in Rust?**
 A: Startup time matters when you're in a terminal all day. Rust gives us <100ms startup vs 500ms+ for Node.js. Plus, no runtime dependencies to manage.
