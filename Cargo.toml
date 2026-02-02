@@ -5,7 +5,7 @@ edition = "2024"
 rust-version = "1.85"
 description = "High-performance AI coding agent CLI - Rust port of pi-mono"
 license = "MIT"
-repository = "https://github.com/yourname/pi"
+repository = "https://github.com/Dicklesworthstone/pi"
 keywords = ["ai", "cli", "coding-agent", "llm", "anthropic"]
 categories = ["command-line-utilities", "development-tools"]
 
@@ -55,6 +55,7 @@ tempfile = "3"
 fs4 = "0.13"
 glob = "0.3"
 ignore = "0.4"
+rusqlite = { version = "0.32", features = ["bundled"] }
 
 # Time
 chrono = { version = "0.4", features = ["serde"] }
