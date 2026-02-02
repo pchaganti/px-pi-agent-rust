@@ -34,7 +34,7 @@ You want an AI coding assistant in your terminal, but existing tools are:
 
 ## The Solution
 
-**Pi** is a from-scratch Rust rewrite of the Pi Agent TypeScript CLI. Single binary, instant startup, rock-solid streaming, and 7 battle-tested built-in tools.
+**pi_agent_rust** is a from-scratch Rust port of [Pi Agent](https://github.com/badlogic/pi) by [Mario Zechner](https://github.com/badlogic) (made with his blessing!). Single binary, instant startup, rock-solid streaming, and 7 battle-tested built-in tools.
 
 ```bash
 # Start a session
@@ -457,6 +457,9 @@ Pi is honest about what it doesn't do:
 ---
 
 ## FAQ
+
+**Q: What's the relationship to the original Pi Agent?**
+A: This is an authorized Rust port of [Pi Agent](https://github.com/badlogic/pi) by [Mario Zechner](https://github.com/badlogic), created with his blessing. Mario's original TypeScript implementation is excellent—this port aims to bring the same great experience with Rust's performance benefits.
 
 **Q: Why rewrite in Rust?**
 A: Startup time matters when you're in a terminal all day. Rust gives us <100ms startup vs 500ms+ for Node.js. Plus, no runtime dependencies to manage.
