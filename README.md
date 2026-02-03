@@ -481,7 +481,7 @@ Sessions use a tree structure rather than a flat list, enabling conversation bra
 Each line is a self-contained JSON object with a `type` discriminator:
 
 ```json
-{"type":"header","version":3,"cwd":"/project","created":"2024-01-15T10:30:00Z"}
+{"type":"session","version":3,"cwd":"/project","created":"2024-01-15T10:30:00Z"}
 {"type":"message","id":"a1b2c3d4","parent":"root","role":"user","content":[...]}
 {"type":"message","id":"e5f6g7h8","parent":"a1b2c3d4","role":"assistant","content":[...]}
 {"type":"model_change","id":"i9j0k1l2","parent":"e5f6g7h8","model":"claude-sonnet-4-20250514"}
