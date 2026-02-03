@@ -24,17 +24,15 @@ clap = { version = "4", features = ["derive", "env", "string"] }
 clap_complete = "4"
 
 # Async runtime
-# Note: asupersync provides structured concurrency and cancel-correctness.
-# Tokio retained for now during gradual migration.
-# asupersync temporarily disabled due to compilation issues in sibling project
-# asupersync = { path = "../asupersync", features = ["tls", "tls-native-roots", "sqlite"], optional = true }
-tokio = { version = "1", features = ["full"] }
-tokio-stream = "0.1"
+asupersync = { path = "../asupersync", default-features = false, features = ["tls-native-roots", "sqlite"] }
 futures = "0.3"
 async-trait = "0.1"
 
-# HTTP client
-reqwest = { version = "0.13", default-features = false, features = ["json", "rustls", "rustls-native-certs", "stream"] }
+# URL parsing/building
+url = "2"
+
+# Signals
+ctrlc = "3"
 
 # Serialization
 serde = { version = "1", features = ["derive"] }
@@ -90,8 +88,10 @@ vergen-gix = { version = "1", features = ["build", "cargo", "rustc"] }
 
 [dev-dependencies]
 pretty_assertions = "1"
+insta = { version = "1", features = ["filters"] }
 tempfile = "3"
 criterion = { version = "0.7", features = ["html_reports"] }
+jsonschema = { version = "0.40.2", default-features = false }
 
 [[bench]]
 name = "tools"

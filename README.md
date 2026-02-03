@@ -891,6 +891,26 @@ cargo test sse::tests
 cargo test conformance
 ```
 
+### Coverage
+
+Coverage uses `cargo-llvm-cov`:
+
+```bash
+# One-time install
+cargo install cargo-llvm-cov --locked
+rustup component add llvm-tools-preview
+
+# Summary (fastest)
+cargo llvm-cov --all-targets --workspace --summary-only
+
+# LCOV report (for CI/artifacts)
+CI=true VCR_MODE=playback VCR_CASSETTE_DIR=tests/fixtures/vcr \
+  cargo llvm-cov --all-targets --workspace --lcov --output-path lcov.info
+
+# HTML report (defaults to target/llvm-cov/html)
+cargo llvm-cov --all-targets --workspace --html
+```
+
 ### Project Structure
 
 ```
