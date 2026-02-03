@@ -183,6 +183,12 @@ pi --thinking high "Design a distributed rate limiter"
 
 Thinking levels: `off`, `minimal`, `low`, `medium`, `high`, `xhigh`
 
+### Customization (Skills & Prompt Templates)
+
+- **Skills**: Drop `SKILL.md` under `~/.pi/agent/skills/` or `.pi/skills/` and invoke with `/skill:name`.
+- **Prompt templates**: Markdown files under `~/.pi/agent/prompts/` or `.pi/prompts/`; invoke via `/<template> [args]`.
+- **Packages**: Share bundles with `pi install npm:@org/pi-packages` (skills, prompts, themes, extensions).
+
 ---
 
 ## Installation
