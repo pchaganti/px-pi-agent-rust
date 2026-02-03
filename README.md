@@ -242,17 +242,17 @@ pi -p "Quick question"          # Print mode (no session)
 | `--list-models [PATTERN]` | List available models (optional fuzzy filter) |
 | `--export <PATH>` | Export session file to HTML |
 
-### Subcommands (planned)
+### Subcommands
 
 ```bash
-# Package management (not yet implemented in this Rust port)
-pi install <source>    # Install extension/skill/prompt/theme
-pi remove <source>     # Remove from settings
-pi update [source]     # Update packages
-pi list                # List installed packages
+# Package management
+pi install <source> [-l|--local]    # Install a package source and add to settings
+pi remove <source> [-l|--local]     # Remove a package source from settings
+pi update [source]                 # Update all (or one) non-pinned packages
+pi list                            # List user + project packages from settings
 
-# Configuration UI (planned)
-pi config
+# Configuration
+pi config                          # Show settings paths + precedence
 ```
 
 ---
