@@ -102,6 +102,10 @@ harness = false
 name = "extensions"
 harness = false
 
+[[bench]]
+name = "system"
+harness = false
+
 [features]
 default = ["image-resize"]
 image-resize = ["image"]
